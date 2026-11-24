@@ -1,0 +1,518 @@
+{
+    "OperationName": "1327.2CVD_no_flut",
+    "Units": {
+        "Length": "m",
+        "Diameter": "m",
+        "Radius": "m",
+        "SeabedStiffness": "kN/m/m²",
+        "Angle": "deg",
+        "Mass": "t",
+        "Volume": "m³",
+        "MassPerLength": "t/m",
+        "AxialStiffness": "kN",
+        "FlexionalStiffness": "kn.m² or Curve Name",
+        "TorsionalStiffness": "kn.m²"
+    },
+    "SimulationData": {
+        "HsSensibility": 0.25,
+        "MinHs": 0.50,
+        "MaxHs": 3.50,
+        "useVariableTimeStep": "True",
+        "TimeStep": 0.05,
+        "ResultsSheet": "2CVD_PO_GLF-49_no_flut.xlsx"
+    },
+    "EnvironmentDims": {
+        "LDA": 1448,
+        "SeabedNormalStiffness": 100,
+        "SeabedShearStiffness": 100,
+        "FrictionCoefLateral" : 0.90,
+        "FrictionCoefAxial": 0.35
+    },
+    "MCVDims": {
+        "Angle": 60,
+        "A"  : 4.115,
+        "A5" : 4.115,
+        "A10": 4.115,
+        "B"  : 0.863,
+        "C"  : 1.496,
+        "D"  : 0.101,
+        "E"  : 1.240,
+        "F"  : 1.090,
+        "G"  : 1.681,
+        "MassInAir": 2.012,
+        "MassSubmerged": 1.760,
+        "Volume": 0.25,
+        "MCVBaseSize": 0.6
+    },
+    "LineTypeDims" : {
+        "OD" : 0.27339,                 
+        "ID" : 0.1524,                 
+        "MassPerUnitLength" : 0.1042, 
+        "xMinRadius" : 1.81,          
+        "EA" : 387904,                 
+        "EIx" : 8.11                 
+    },
+    "BendRestrictorDims" : {
+        "Length" : 7.0,
+        "OD" : 0.464,
+        "ID" : 0.322,
+        "MassPerUnitLength" : 0.190,
+        "xMinRadius" : 2.900,
+        "EA" : 200,
+        "EIx" : "Bend Restrictor Stiffness Curve"
+    },
+    "EndFittingDims" : {
+        "Length" : 1.371,
+        "OD" : 0.395,
+        "ID" : 0.208,
+        "MassPerUnitLength" : 0.745,
+        "xMinRadius" : 10,
+        "EA" : 1e7,
+        "EIx" : 1e5
+    },
+    "CraneWireDims" : {
+        "OD" : 0.102,
+        "ID" : 0.000,
+        "MassPerUnitLength" : 0.04412,
+        "xMinRadius" : 2.0,
+        "EA" : 786100,
+        "EIx" : 162.4
+    },
+    "WinchWireDims" : {
+        "OD" : 0.036,
+        "ID" : 0.000,
+        "MassPerUnitLength" : 0.0064,
+        "xMinRadius" : 2.0,
+        "EA" : 370500,
+        "EIx" : 1.1
+    },
+    "CamelBackDims" : {
+        "SlingLength" : 7.50,
+        "Leg1KP" : 17.0,
+        "Leg2KP" : 22.0,
+        "Stiffness": 6e3
+    },
+    "FloaterDims" : {
+        "FloaterBuoyancy": [],
+        "FloaterKPs": [],
+        "FloaterSlingLength": [],
+        "FloaterSlingStiffness": []
+    },
+    "acceptanceCriteria" : {
+        "Axial Tension": {
+                "Type": "Time History",
+                "OrcaFlex Parent": "Line",
+                "OrcaFlex Variable Name": "End Force",
+                "OrcaFlex Extra": "End A",
+                "Limit": 95.0                    
+        },
+        "Bend moment": {
+                "Type": "Time History",
+                "OrcaFlex Parent": "Line",
+                "OrcaFlex Variable Name": "End Moment",
+                "OrcaFlex Extra": "End A",
+                "Limit": 120.0                        
+        },
+        "Shear force": {
+                "Type": "Time History",
+                "OrcaFlex Parent": "Line",
+                "OrcaFlex Variable Name": "Shear force",
+                "OrcaFlex Extra": "End A",
+                "Limit": 60.0                      
+        },
+        "Curvature": {
+                "Type": "Range Graph Max",
+                "OrcaFlex Parent": "Line",
+                "OrcaFlex Variable Name": "Curvature",
+                "OrcaFlex Extra": "End A",
+                "Limit": 0.5525                        
+        },
+        "Bend moment BR": {
+                "Type": "Range Graph Max",
+                "OrcaFlex Parent": "Bend Restrictor Element",
+                "OrcaFlex Variable Name": "Bend moment",
+                "OrcaFlex Extra": "",
+                "Limit": 120.0               
+        },
+        "Shear force BR": {
+                "Type": "Range Graph Max",
+                "OrcaFlex Parent": "Bend Restrictor Element",
+                "OrcaFlex Variable Name": "Shear force",
+                "OrcaFlex Extra": "",
+                "Limit": 60.0                          
+        },
+        "Curvature BR": {
+                "Type": "Range Graph Max",
+                "OrcaFlex Parent": "Bend Restrictor Element",
+                "OrcaFlex Variable Name": "Curvature",
+                "OrcaFlex Extra": "",
+                "Limit": 0.9061                      
+        }
+    },
+    "postProcess" : {
+        "Wave Height (m)": {
+            "OrcaFlex Method": "Get data",
+            "OrcaFlex Parent": "Environment",
+            "OrcaFlex Variable Name": "WaveHs",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Wave Period (s)": {
+            "OrcaFlex Method": "Get data",
+            "OrcaFlex Parent": "Environment",
+            "OrcaFlex Variable Name": "WaveTp",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Wave Direction (deg)": {
+            "OrcaFlex Method": "Get data",
+            "OrcaFlex Parent": "Environment",
+            "OrcaFlex Variable Name": "WaveDirection",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Vessel Heading (deg)": {
+            "OrcaFlex Method": "Get data",
+            "OrcaFlex Parent": "Island Performer",
+            "OrcaFlex Variable Name": "InitialHeading",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "General Implicit Solver iteration count": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "General",
+            "OrcaFlex Variable Name": "Implicit solver iteration count",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "MCV Z - Static (m)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "MCV",
+            "OrcaFlex Variable Name": "Z",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "MCV X - Static (m)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "MCV",
+            "OrcaFlex Variable Name": "X",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "MCV Rotation 2 - Static (deg)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "MCV",
+            "OrcaFlex Variable Name": "Rotation 2",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Line End B X (m)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "X",
+            "OrcaFlex Extra": "End B",
+            "Simulation Period": ""
+        },
+        "Line Touchdown X Static (m)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "X",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": ""
+        },
+        "Line Touchdown X Min (m)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "X",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Touchdown X Max (m)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "X",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Seabed Clearance Min Static (m)": {
+            "OrcaFlex Method": "Range graph min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Seabed clearance",
+            "OrcaFlex Extra": [0.0, 29.0],
+            "Simulation Period": ""
+        },
+        "Line Seabed Clearance Max Static (m)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Seabed clearance",
+            "OrcaFlex Extra": [9.0, 29.0],
+            "Simulation Period": ""
+        },
+        "Line Seabed Clearance Min Dynamic (m)": {
+            "OrcaFlex Method": "Range graph min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Seabed clearance",
+            "OrcaFlex Extra": [0.0, 29.0],
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Seabed Clearance Max Dynamic (m)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Seabed clearance",
+            "OrcaFlex Extra": [9.0, 29.0],
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Touchdown Arc Length - Statics (m)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Actual arc length",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": ""
+        },
+        "Line Touchdown Arc Length - Min (m)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Actual arc length",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Touchdown Arc Length - Max (m)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Actual arc length",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Touchdown Effective tension - Statics (kN)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": ""
+        },
+        "Line Touchdown Effective tension - Min (kN)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Touchdown Effective tension - Max (kN)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "Touchdown",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line End B Effective tension - Static result (kN)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": ""
+        },
+        "Line End B Bend moment - Static result (kN.m)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Bend Moment",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": ""
+        },
+        "Line End B Shear force - Static result (kN)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Shear force",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": ""
+        },
+        "Line End B Effective tension - Min (kN)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line End B Bend moment - Min (kN.m)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Bend moment",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line End B Shear force - Min (kN)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Shear force",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line End B Effective tension - Max (kN)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line End B Bend moment - Max (kN.m)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Bend moment",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line End B Shear force - Max (kN)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Shear force",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Bend radius - Statics (m)": {
+            "OrcaFlex Method": "Range graph min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Bend radius",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Line Bend radius - Dynamics (m)": {
+            "OrcaFlex Method": "Range graph min",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Bend radius",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Line Bend moment - Statics (kN.m)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Bend moment",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Line Bend moment - Dynamics (kN.m)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Line",
+            "OrcaFlex Variable Name": "Bend moment",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Bend Restrictor Bend radius - Statics (m)": {
+            "OrcaFlex Method": "Range graph min",
+            "OrcaFlex Parent": "Bend Restrictor Element",
+            "OrcaFlex Variable Name": "Bend radius",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Bend Restrictor Bend moment - Statics (kN.m)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Bend Restrictor Element",
+            "OrcaFlex Variable Name": "Bend moment",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Bend Restrictor Shear force - Statics (kN)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Bend Restrictor Element",
+            "OrcaFlex Variable Name": "Shear force",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Bend Restrictor Bend radius - Dynamics (m)": {
+            "OrcaFlex Method": "Range graph min",
+            "OrcaFlex Parent": "Bend Restrictor Element",
+            "OrcaFlex Variable Name": "Bend radius",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Bend Restrictor Bend moment - Dynamics (kN.m)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Bend Restrictor Element",
+            "OrcaFlex Variable Name": "Bend moment",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Bend Restrictor Shear force - Dynamics (kN)": {
+            "OrcaFlex Method": "Range graph max",
+            "OrcaFlex Parent": "Bend Restrictor Element",
+            "OrcaFlex Variable Name": "Shear force",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Winch Wire Effective tension - Statics (kN)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Winch Wire",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": ""
+        },
+        "Link CB 1 tension - Statics (kN)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Link CB 1",
+            "OrcaFlex Variable Name": "Tension",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Link CB 2 tension - Statics (kN)": {
+            "OrcaFlex Method": "Static result",
+            "OrcaFlex Parent": "Link CB 2",
+            "OrcaFlex Variable Name": "Tension",
+            "OrcaFlex Extra": "",
+            "Simulation Period": ""
+        },
+        "Winch Wire Effective tension - Min (kN)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Winch Wire",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Link CB 1 tension - Min (kN)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Link CB 1",
+            "OrcaFlex Variable Name": "Tension",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Link CB 2 tension - Min (kN)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "Link CB 2",
+            "OrcaFlex Variable Name": "Tension",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Winch Wire Effective tension - Max (kN)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Winch Wire",
+            "OrcaFlex Variable Name": "Effective tension",
+            "OrcaFlex Extra": "End A",
+            "Simulation Period": "Whole simulation"
+        },
+        "Link CB 1 tension - Max (kN)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Link CB 1",
+            "OrcaFlex Variable Name": "Tension",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Link CB 2 tension - Max (kN)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "Link CB 2",
+            "OrcaFlex Variable Name": "Tension",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Crane Tip dynamic z - Max (m)": {
+            "OrcaFlex Method": "Max",
+            "OrcaFlex Parent": "PontaGuindastePrincipal",
+            "OrcaFlex Variable Name": "In-frame dynamic z",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        },
+        "Crane Tip dynamic z - Min (m)": {
+            "OrcaFlex Method": "Min",
+            "OrcaFlex Parent": "PontaGuindastePrincipal",
+            "OrcaFlex Variable Name": "In-frame dynamic z",
+            "OrcaFlex Extra": "",
+            "Simulation Period": "Whole simulation"
+        }
+    }
+}

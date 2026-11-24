@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# OrcaFlex e saídas das análises (dados de cliente: nunca vão para o git)
+*.sim
+*.dat
+*.yml.bak
+*.log
+
+# Arquivos de projeto: cada pasta de projeto tem os seus (criados pelo "python -m cvdtools setup")
+/cvd_project.json
+/cvd_config.xlsx
+/cvd_curves.xlsx
+/casos/
+/scripts/
+/baseline/
+/.vscode/
+*.bak
+*.bak_*.xlsx
+cvd_config.bak_*
+
+# Excel aberto
+~$*
