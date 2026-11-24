@@ -28,7 +28,7 @@ from .project import PROJECT_FILE
 SCRIPTS_DIR = "scripts"
 STATE_FILE = ".cvd_scripts.json"          # hash de cada script gerado (para saber se o usuário editou)
 USER_FILES = {"00_caso.py"}               # guardam o caso do usuário: nunca trocados depois de criados
-DEFAULT_REPO = "https://github.com/<ORG>/cvdtools.git"
+DEFAULT_REPO = "https://github.com/ThyagoCap/cvdtools.git"
 
 
 def _sha(text: str) -> str:

@@ -296,13 +296,14 @@ def _describe(model) -> str:
 
 
 class DampingLadder:
-    """Nível de damping lembrado entre estáticas seguidas (0.10.4).
+    """Nível de damping lembrado entre estáticas seguidas (0.10.4; 0.11.1).
 
-    Cada estática começa no nível mais baixo que já convergiu (``start``); depois de convergir, o damping
-    desce ÷ ``statics.robust_factor`` até o piso (``clamp_damping``), partindo das posições convergidas; só
-    sobe (× fator e Jacobiano ``statics.robust_jacobian``) quando a estática não converge. Um nível em que
-    uma estática "do zero" falhou não volta a ser ponto de partida, e uma descida que falhou não é tentada de
-    novo com o mesmo ``ladder`` (evita repetir a falha a cada avaliação).
+    Cada estática começa no nível mais baixo que convergiu na estática anterior (``start``); depois de
+    convergir, o damping desce ÷ ``statics.robust_factor`` até o piso (``clamp_damping``), partindo das
+    posições convergidas; só sobe (× fator e Jacobiano ``statics.robust_jacobian``) quando a estática não
+    converge. Nada mais fica lembrado de uma estática para a outra: a 0.10.4 guardava os níveis que já
+    tinham falhado e, depois de uma falha no início da busca, todas as estáticas seguintes começavam no teto
+    (1e4/1e4, Jacobiano 1e-3), muito lentas.
     """
 
     def __init__(self, case):
@@ -312,9 +313,13 @@ class DampingLadder:
         self.iterations = case.num("statics.robust_max_iterations")
         self.start = clamp_damping(case, case.num("statics.robust_min_damping"),
                                    case.num("statics.robust_max_damping"))
-        self.jacobian = None          # None = o do modelo; 1e-3 depois da 1ª subida (fica até o fim)
-        self.failed_fresh: tuple | None = None   # maior nível em que uma estática do zero falhou
-        self.failed_down: tuple | None = None    # maior nível em que uma descida (das posições convergidas) falhou
+        self.jacobian = None          # None = o do modelo; 1e-3 depois de uma subida (só nessa estática)
+        self.failed_down = None       # descida que falhou nesta estática (não tenta de novo)
+
+    def begin(self) -> None:
+        """Nova estática: Jacobiano do modelo e nenhuma descida bloqueada."""
+        self.jacobian = None
+        self.failed_down = None
 
     def down(self, level):
         return clamp_damping(self.case, level[0] / self.factor, level[1] / self.factor)
@@ -322,14 +327,8 @@ class DampingLadder:
     def up(self, level):
         return clamp_damping(self.case, level[0] * self.factor, level[1] * self.factor)
 
-    def remember_fresh_failure(self, level) -> None:
-        if self.failed_fresh is None or level[0] > self.failed_fresh[0]:
-            self.failed_fresh = level
-
     def remember_converged(self, level) -> None:
-        """Próxima estática parte daqui, mas acima de qualquer nível que já falhou do zero."""
-        if self.failed_fresh is not None and level[0] <= self.failed_fresh[0]:
-            level = self.up(self.failed_fresh)
+        """A próxima estática parte do nível mais baixo que convergiu nesta."""
         self.start = level
 
 
@@ -379,6 +378,7 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
             values["JacobianPerturbationFactor"] = ladder.jacobian
         _set_general(model, values, original)
 
+    ladder.begin()
     level = ladder.start
     apply(level)
     try:
@@ -388,7 +388,6 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
                 calculate_statics(model, name, stall)
                 break
             except StaticsFailed as exc:
-                ladder.remember_fresh_failure(level)
                 up = ladder.up(level)
                 jac = ladder.jacobian
                 if jac is None:

@@ -174,11 +174,33 @@ def test_ladder_remembers_level_between_evaluations(legacy_inputs):
     assert m.seen == [(50000, 1000.0, 10000.0), (50000, 100.0, 1000.0), (50000, 10.0, 100.0),
                       (50000, 10.0, 100.0), (50000, 10.0, 100.0)]
     assert ladder.start == (10.0, 100.0)
-    # passa a exigir 100: falha no piso, sobe ×10 e converge; a próxima já parte de 100/1000
+    # passa a exigir 100: falha no piso, sobe ×10 e converge; a descida a 10/100 falha e volta a 100/1000.
+    # A próxima parte de 100/1000 (o mais baixo que convergiu), com o Jacobiano do modelo, e tenta descer de novo.
     m.needs = 100
     m.seen.clear()
     restore_statics_settings(m, calculate_statics_robust(m, case, "puxada", ladder=ladder))
+    assert m.seen == [(50000, 10.0, 100.0), (50000, 100.0, 1000.0), (50000, 10.0, 100.0), (50000, 100.0, 1000.0)]
+    assert ladder.start == (100.0, 1000.0)
+    m.needs = 10   # ficou fácil de novo: desce ao piso e a seguinte já parte dele
+    m.seen.clear()
     restore_statics_settings(m, calculate_statics_robust(m, case, "puxada", ladder=ladder))
-    # (a descida a 10/100 falhou uma vez: não é tentada de novo)
-    assert m.seen == [(50000, 10.0, 100.0), (50000, 100.0, 1000.0), (50000, 10.0, 100.0), (50000, 100.0, 1000.0),
-                      (50000, 100.0, 1000.0)]
+    restore_statics_settings(m, calculate_statics_robust(m, case, "puxada", ladder=ladder))
+    assert m.seen == [(50000, 100.0, 1000.0), (50000, 10.0, 100.0), (50000, 10.0, 100.0)]
+
+
+def test_early_failure_does_not_pin_the_ceiling(legacy_inputs):
+    """0.11.1: uma falha no começo (até o teto 1e4/1e4) não faz as estáticas seguintes começarem no teto."""
+    from cvdtools._orcaflex import DampingLadder
+
+    case = _case(legacy_inputs, statics__robust="sempre")
+    ladder = DampingLadder(case)
+    m = HardModel(needs=1e4)
+    restore_statics_settings(m, calculate_statics_robust(m, case, "1ª", ladder=ladder))
+    assert ladder.start == (1e4, 1e4)
+    m.needs = 10
+    m.seen.clear()
+    restore_statics_settings(m, calculate_statics_robust(m, case, "2ª", ladder=ladder))
+    restore_statics_settings(m, calculate_statics_robust(m, case, "3ª", ladder=ladder))
+    assert m.seen == [(50000, 1e4, 1e4), (50000, 1e3, 1e3), (50000, 100.0, 100.0), (50000, 10.0, 100.0),
+                      (50000, 10.0, 100.0)]
+    assert ladder.jacobian is None, "Jacobiano 1e-3 só na estática que precisou subir"
