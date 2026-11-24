@@ -552,6 +552,83 @@ def _arith(expr: str) -> float:
 
 # --------------------------------------------------------------------------- atualização
 
+def free_path(path: Path) -> Path:
+    """``path`` ou, se já existir, ``<nome>_2``, ``<nome>_3``... (cópias no mesmo segundo não se sobrescrevem)."""
+    n, out = 2, Path(path)
+    while out.exists():
+        out = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        n += 1
+    return out
+
+
+def set_config_values(path: Path | str, defaults: Optional[dict[str, Any]] = None,
+                      overrides: Optional[dict[str, dict[str, Any]]] = None, comment: str = "") -> list[str]:
+    """Grava valores na aba Defaults (projeto) e na aba Overrides (``{ID: {chave: valor}}``).
+
+    Linhas existentes são atualizadas (Defaults pela chave; Overrides por ID + chave); as que faltam são
+    acrescentadas. Antes de salvar, grava uma cópia ``<nome>.bak_<data>.xlsx`` ao lado.
+    """
+    import datetime as _dt
+    import shutil
+
+    from openpyxl import load_workbook
+
+    path = Path(path)
+    defaults = dict(defaults or {})
+    overrides = {str(cid).strip(): dict(kv) for cid, kv in (overrides or {}).items() if kv}
+    for key in list(defaults) + [k for kv in overrides.values() for k in kv]:
+        P.get(key)  # valida a chave
+    if not defaults and not overrides:
+        return []
+    wb = load_workbook(path)
+    changes: list[str] = []
+
+    ws = wb["Defaults"]
+    present = {str(r[0].value).strip(): r for r in ws.iter_rows(min_row=2) if r[0].value}
+    for key, value in defaults.items():
+        if key in present:
+            old = present[key][1].value
+            present[key][1].value = value
+            changes.append(f"Defaults: {key}: {old!r} -> {value!r}")
+        else:
+            ws.append([key, value, P.get(key).unit, P.get(key).description])
+            changes.append(f"Defaults: + {key} = {value!r}")
+
+    ws = wb["Overrides"]
+    header = [str(c.value).strip() if c.value is not None else "" for c in ws[1]]
+    col = {name: header.index(name) for name in SHEETS["Overrides"] if name in header}
+    existing = {}
+    for r in ws.iter_rows(min_row=2):
+        cid, key = r[col["ID"]].value, r[col["Parâmetro"]].value
+        if cid and key:
+            existing[(str(cid).strip(), str(key).strip())] = r
+    for cid, kv in overrides.items():
+        for key, value in kv.items():
+            r = existing.get((cid, key))
+            if r is not None:
+                old = r[col["Valor"]].value
+                r[col["Valor"]].value = value
+                if comment and "Comentário" in col:
+                    r[col["Comentário"]].value = comment
+                changes.append(f"Overrides [{cid}]: {key}: {old!r} -> {value!r}")
+            else:
+                new = [None] * len(header)
+                new[col["ID"]], new[col["Parâmetro"]], new[col["Valor"]] = cid, key, value
+                if "Comentário" in col:
+                    new[col["Comentário"]] = comment
+                ws.append(new)
+                changes.append(f"Overrides [{cid}]: + {key} = {value!r}")
+
+    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    try:
+        shutil.copy2(path, free_path(path.with_name(f"{path.stem}.bak_{stamp}{path.suffix}")))
+        wb.save(path)
+    except PermissionError as exc:
+        raise PermissionError(f"Não consegui gravar {path.name} ({exc}). Feche o arquivo no Excel e rode de "
+                              f"novo.") from None
+    return changes
+
+
 def upgrade_config(path: Path | str, sets: Optional[dict[str, str]] = None) -> list[str]:
     """Acrescenta a uma configuração existente o que versões novas do pacote introduziram.
 

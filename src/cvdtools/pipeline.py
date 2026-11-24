@@ -91,17 +91,63 @@ def build_case(project: Project, case_id: str, out_dir: Optional[str] = None, ca
         return _build_case(project, case_id, out_dir, catenary, overwrite, checklist, legacy_json)
 
 
+def missing_data_round(project: Project, case_id: str, case: CaseInputs, target: Path) -> CaseInputs:
+    """Aplica o ``missing_data.json`` da pasta do caso (se houver) e confere os inputs obrigatórios.
+
+    Faltando algo, grava um ``missing_data.json`` novo para o usuário preencher e para com
+    :class:`MissingInputError`. Sem pendências, o arquivo aplicado é arquivado e o caso (relido) é devolvido.
+    """
+    from . import missing_data as MD
+    from .model.builder import required_keys
+    from .schema import MissingInputError
+
+    path = target / MD.FILE_NAME
+    existed, changes, invalid = path.exists(), [], {}
+    if existed:
+        with step(f"Aplicando {path}"):
+            changes, invalid = MD.apply_missing_data(path, case_id, read_input_sheet(project.workbook),
+                                                     project.config)
+        for c in changes:
+            log.info("  %s: %s", project.config.name, c)
+        for key, (raw, err) in invalid.items():
+            log.warning("  %s = %r não aplicado: %s", key, raw, err)
+        if changes:
+            case = load_case(project, case_id)
+    missing = case.missing(required_keys(case))
+    if not missing:
+        if existed:
+            log.info("Sem inputs faltando; %s arquivado como %s", MD.FILE_NAME, MD.archive(path).name)
+        return case
+
+    items = MD.pending_items(case, read_input_sheet(project.workbook), missing)
+    for item in items:
+        if item["parametro"] in invalid:
+            item["valor"], item["erro"] = invalid[item["parametro"]]
+    if existed and changes:
+        MD.archive(path)   # registro do que já foi gravado no cvd_config.xlsx
+    MD.write_missing_data(path, case, items, project.config)
+    if existed and not changes and not invalid:
+        head = f"{MD.FILE_NAME} ainda não foi preenchido: informe 'valor' de cada item"
+    elif existed:
+        head = f"Ainda faltam inputs; {MD.FILE_NAME} gerado de novo só com o que falta (preencha 'valor')"
+    else:
+        head = f"Faltam inputs obrigatórios: preencha 'valor' de cada item em {MD.FILE_NAME}"
+    raise MissingInputError(f"Caso {case_id}: {head} e rode de novo.\n  Arquivo: {path}\n{MD.summary(items)}")
+
+
 def _build_case(project: Project, case_id: str, out_dir, catenary, overwrite, checklist, legacy_json) -> dict:
     from .model.builder import build_model
 
     case = load_case(project, case_id)
+    target = case_output_dir(project, case, out_dir)
+    if case.operation.camelback or case.operation.supported:
+        case = missing_data_round(project, case_id, case, target)
     two_ends = case.modelled_ends() == 2
     base_name = (case.operation.base_model_two_ends or case.operation.base_model) if two_ends \
         else case.operation.base_model
     if not base_name:
         raise ValueError(f"Sem 'Modelo base' para '{case.operation.operation_type}' na aba Operações.")
     base = project.base_model(base_name)
-    target = case_output_dir(project, case, out_dir)
     model_path = target / f"{case.operation_name}.dat"
     if model_path.exists() and not overwrite:
         raise FileExistsError(f"{model_path} já existe (use --overwrite)")

@@ -350,6 +350,7 @@ META_COLUMNS = {
     "ID": "id",
     "Folder": "folder",
     "Line Structure": "line_structure",  # só informativo (referência da estrutura da linha)
+    "Other End ID": "other_end_id",      # só sugestão: o ID da outra extremidade é confirmado pelo usuário
 }
 
 

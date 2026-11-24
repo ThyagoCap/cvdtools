@@ -40,7 +40,7 @@ python -m pip install -e ".[dev,orcaflex]"
 python -m pytest -q -m "not orcaflex and not baseline"
 ```
 
-- Uma versão nova: suba `version` em `pyproject.toml` e `src/cvdtools/__init__.py`, rode os testes, faça o commit e uma tag (`git tag v0.12.1 && git push --tags`). A equipe atualiza com o comando 1 (sem tag, pega o `main`; para fixar uma versão: `...cvdtools.git@v0.12.1`).
+- Uma versão nova: suba `version` em `pyproject.toml` e `src/cvdtools/__init__.py`, rode os testes, faça o commit e uma tag (`git tag v0.13.0 && git push --tags`). A equipe atualiza com o comando 1 (sem tag, pega o `main`; para fixar uma versão: `...cvdtools.git@v0.13.0`).
 - Script novo para a equipe: um arquivo em `src/cvdtools/templates/scripts/` que chama uma função de `src/cvdtools/api.py`. O `setup` distribui.
 - O GitHub Actions (`.github/workflows/tests.yml`) roda os testes sem OrcaFlex em cada push.
 - Arquivos de projeto (`cvd_project.json`, `cvd_config.xlsx`, `cvd_curves.xlsx`, `casos/`, `scripts/`, `baseline/`) e arquivos do OrcaFlex nunca entram no git (`.gitignore`).
@@ -146,6 +146,15 @@ Curvas que vêm de fora do OrcaFlex ficam numa **biblioteca de curvas** (`cvd_cu
 ### Sugestão da outra extremidade
 
 Quando um caso vai usar duas extremidades (ou é uma linha curta que pede confirmação), a validação lista os casos da mesma linha (mesmo poço e descrição). A operação do "outro lado" vem primeiro, conforme a coluna `Outra extremidade (sugestão)` da aba Operações: 1st end DCVD ↔ 2nd end DCVD e 1st end CVD ↔ 2nd end CVD. É só sugestão; a escolha é sempre `model.end_b_case_id`.
+
+### Inputs faltando: `missing_data.json` (0.13.0)
+
+Se o `build` (script `02_montar_modelo.py`) encontra inputs obrigatórios faltando, ele para e grava `<pasta do caso>\missing_data.json`, um item por input com `"valor": null`, a descrição, a unidade, o valor atual e o destino. Preencha `valor` e rode de novo (com o `cvd_config.xlsx` fechado no Excel). A rodada seguinte grava os valores no `cvd_config.xlsx` (com `.bak`) e segue:
+
+- **Defaults** (projeto inteiro): parâmetros sem coluna na Input Sheet, como LDA, atritos, EIx dos cabos e dimensões da corcova;
+- **Overrides** (só este caso): o ID do MCV da outra extremidade (`model.end_b_case_id`; com ele, as cotas e a massa do MCV B vêm dessa linha da planilha geral, então elas não são pedidas uma a uma) e valores que deveriam vir da Input Sheet (a planilha geral é só leitura; corrigir lá também resolve). As sugestões do ID vêm da coluna `Other End ID` da planilha geral, se existir, e dos casos da mesma linha; nenhuma é aplicada sem o usuário escrever o valor.
+
+Nada é preenchido sozinho: item deixado em `null` continua faltando, e o arquivo é gerado de novo só com o que falta. Valor inválido (texto em campo numérico, ID inexistente) não é gravado: volta no arquivo com o campo `erro`. JSON quebrado ou de outro caso não é sobrescrito. Sem pendências, o arquivo vira `missing_data.aplicado_<data>.json`, um registro do que foi gravado.
 
 Com duas extremidades, o MCV B fica num constraint (`Constraint B`) com só o X livre, puxado para longe do MCV A por um tirante macio (`MCV B Pull`) com a tração `model.end_b_tension_target`. Uma estática (sem a corcova) já dá a distância de equilíbrio, e a linha não fica comprimida enquanto o solver procura a posição. `model.end_b_x_free`: `montagem` (padrão: livre só nesse ajuste; no modelo o X fica fixo na posição encontrada e o tirante sai), `sempre` (livre também na estática final, nas posições e na dinâmica) ou `nao` (MCV B ancorado e distância por busca, como até a 0.9.1). `model.end_b_pull_length` (200 m) é a distância até a âncora do tirante. Cada modelo de estática de ajuste é salvo antes de rodar em `<caso>\00.Montagem\` (`_ajuste_hubs`, `_ajuste_endB`, `_sem_corcova`), para conferir no OrcaFlex mesmo se não convergir; o `.dat` do caso é salvo montado antes de qualquer estática.
 
