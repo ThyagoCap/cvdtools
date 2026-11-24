@@ -92,6 +92,12 @@ def projeto_atual() -> Path:
 def ler_caso(script: Optional[str] = None) -> dict:
     """Configurações de ``00_caso.py`` (na pasta do ``script``, ou do script que chamou)."""
     folder = Path(script).resolve().parent if script else _caller_dir()
+    try:   # 0.12.1: cvdtools atualizado -> scripts no padrão da versão instalada
+        from .setup_project import refresh_scripts_if_outdated
+
+        refresh_scripts_if_outdated(folder)
+    except Exception as exc:
+        print(f"Aviso: não consegui conferir a versão dos scripts ({exc})")
     path = folder / CASE_SETTINGS_FILE
     if not path.is_file():
         raise CvdError(f"Não achei {path}. Ele é criado pelo 'python -m cvdtools setup'.")
@@ -249,6 +255,22 @@ def posicoes_estaticas(case_id: str, modelo: Optional[str] = None, pasta: Option
     comando("statics", "positions", case_id,
             "--model", _need(_path(modelo, paths.modelo), "Modelo", "Rode antes o 02_montar_modelo.py."),
             *_opt("--only", only), *_opt("--no-sims", not salvar_sims))
+
+
+def modelo_dinamico(case_id: str, posicao: str = "01.Horizontal", origem: Optional[str] = None,
+                    pasta: Optional[str] = None, conferir_estatica: bool = True, gerar_mares: bool = True,
+                    rodar: bool = False, regular: bool = False, sobrescrever: bool = False,
+                    simultaneas: Optional[int] = None) -> Path:
+    """Modelo dinâmico base ``<nome>_dyn.dat`` a partir da posição (padrão 01.Horizontal): MCV ancorado, sem o
+    cabo do guindaste. Com ``gerar_mares``, gera em seguida os estados de mar em <caso>/02.Dynamic."""
+    paths = caso(case_id, pasta)
+    if origem is None:
+        _need(paths.pasta / "01.Positions", "Pasta das posições", "Rode antes o 03_posicoes_estaticas.py.")
+    comando("dynbase", case_id, *_opt("--position", posicao), *_opt("--source", _path(origem, None) if origem else None),
+            *_opt("--out", str(paths.pasta) if pasta else None), *_opt("--no-check", not conferir_estatica),
+            *_opt("--seastates", gerar_mares), *_opt("--regular", regular), *_opt("--run", rodar),
+            *_opt("--overwrite", sobrescrever), *_opt("--workers", simultaneas))
+    return paths.modelo_dinamico
 
 
 def estados_de_mar(case_id: str, modelo_dinamico: Optional[str] = None, pasta_saida: Optional[str] = None,

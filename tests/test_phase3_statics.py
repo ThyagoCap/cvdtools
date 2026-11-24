@@ -216,6 +216,7 @@ def test_fixed_overpull_fails_when_payout_does_not_help(built_case, tmp_path):
 
 def test_sweep_logs_nonconvergence(built_case):
     case, path = built_case
+    case.values["statics.max_length_step"] = ResolvedValue(0.0, "override")   # sem passos intermediários
     eng = StaticsEngine(case, path)
     evs = eng.sweep("free", [9.9, 10.1, 10.5])
     assert [e.converged for e in evs] == [True, False, True]
@@ -324,9 +325,87 @@ def test_each_statics_starts_with_fixed_masterlink(built_case, fake_orc):
     assert ev.converged
     assert seen[:3] == [("statics", "Fixed"), ("positions", "Fixed"), ("statics", original)]
     assert eng.model["Masterlink"].Connection == original
+    # 0.11.2: masterlink resolvido -> as próximas avaliações (outro comprimento de cabo) só com ele livre
+    seen.clear()
+    eng.evaluate("teste", "fixed", eng.L_built - 0.5)
+    assert ("statics", "Fixed") not in seen and seen[0] == ("statics", original)
 
     seen.clear()
     case.values["statics.masterlink_fixed_first"] = ResolvedValue(0.0, "override")
     eng = StaticsEngine(case, path)
     eng.evaluate("teste", "fixed", eng.L_built)
     assert seen[0] == ("statics", original) and ("statics", "Fixed") not in seen
+
+
+def test_cable_changes_in_steps_of_at_most_max_length_step(built_case, fake_orc):
+    """0.11.3: o cabo muda no máximo statics.max_length_step (0,5 m) por estática."""
+    lengths = []
+
+    class Recorder(PhysicsModel):
+        def CalculateStatics(self):
+            lengths.append(self.objects["Winch Wire"]["Length"][0])
+            super().CalculateStatics()
+
+    case, path = built_case
+    fake_orc.Model = Recorder
+    eng = StaticsEngine(case, path)
+    eng.evaluate("teste", "free", eng.L_built)
+    lengths.clear()
+    ev = eng.evaluate("teste", "free", eng.L_built - 1.2)
+    assert ev.converged
+    distinct = sorted(set(round(x, 6) for x in lengths), reverse=True)
+    assert distinct == pytest.approx([eng.L_built - 0.4, eng.L_built - 0.8, eng.L_built - 1.2])
+    steps = [a - b for a, b in zip([eng.L_built] + distinct, distinct)]
+    assert max(steps) <= 0.5 + 1e-9
+
+
+def test_angle_search_stops_on_angle_tolerance():
+    """0.11.5: busca de ângulo vai até |f| <= ftol (0,005°), mesmo abaixo da tolerância da puxada."""
+    from cvdtools.statics.solver import Search
+
+    s = Search(lambda x: 3.0 * (x - 1.2345678), xtol=0.01, ftol=0.005)
+    x = s.solve(0.0, 0.5, 0.0, 5.0)
+    assert abs(3.0 * (x - 1.2345678)) <= 0.005
+    s2 = Search(lambda x: 3.0 * (x - 1.2345678), xtol=0.01)          # sem ftol: só a puxada (±0,01 m)
+    x2 = s2.solve(0.0, 0.5, 0.0, 5.0)
+    assert abs(x2 - 1.2345678) <= 0.011
+
+
+def _walker(root, start):
+    """f(x) = x - root, guardando a ordem das avaliações; 'current' = último x avaliado (convergido)."""
+    from cvdtools.statics.solver import Search
+
+    state = {"cur": start, "xs": []}
+
+    def f(x):
+        state["xs"].append(x)
+        state["cur"] = x
+        return x - root
+
+    s = Search(f, xtol=0.01, max_evals=100, max_step=0.5, current=lambda: state["cur"])
+    return s, state
+
+
+def test_bracket_steps_never_exceed_max_step():
+    """0.11.6: enquadramento anda de 0,5 em 0,5 m (sem dobrar além) e cada passo é avaliado."""
+    s, st = _walker(root=3.3, start=0.0)
+    x = s.solve(0.0, 0.5, -30.0, 30.0)
+    assert abs(x - 3.3) <= 0.011
+    xs = [0.0] + st["xs"]
+    assert max(abs(b - a) for a, b in zip(xs, xs[1:])) <= 0.5 + 1e-9
+    assert len(st["xs"]) < 20
+
+
+def test_far_evaluation_stops_at_first_sign_change():
+    """0.11.6: pedido 4 m adiante com a raiz a 1,2 m: os passos intermediários acham a troca de sinal e o
+    refino começa ali, sem avaliar os 4 m."""
+    s, st = _walker(root=1.2, start=0.0)
+    s._solving = True
+    from cvdtools.statics.solver import EarlyBracket
+
+    s._eval1(0.0)
+    with pytest.raises(EarlyBracket) as e:
+        s.eval(4.0)
+    a, fa, b, fb = e.value.bracket
+    assert a == pytest.approx(1.0) and b == pytest.approx(1.5)
+    assert max(st["xs"]) <= 1.5 + 1e-9

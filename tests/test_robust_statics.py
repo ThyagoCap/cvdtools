@@ -204,3 +204,74 @@ def test_early_failure_does_not_pin_the_ceiling(legacy_inputs):
     assert m.seen == [(50000, 1e4, 1e4), (50000, 1e3, 1e3), (50000, 100.0, 100.0), (50000, 10.0, 100.0),
                       (50000, 10.0, 100.0)]
     assert ladder.jacobian is None, "Jacobiano 1e-3 só na estática que precisou subir"
+
+
+class StuckModel(HardModel):
+    """Para com resíduo ``residual`` até o Jacobiano chegar a ``jac_needed``; guarda (dmin, dmax, jac)."""
+
+    def __init__(self, residual, jac_needed, needs=10):
+        super().__init__(needs=needs)
+        self.residual, self.jac_needed = residual, jac_needed
+        self.runs = []
+
+    def CalculateStatics(self):
+        g = self.objects["General"]
+        jac = g.get("JacobianPerturbationFactor", 0.0)
+        self.runs.append((g["StaticsMinDamping"], g["StaticsMaxDamping"], jac))
+        handler = getattr(self, "staticsProgressHandler", None)
+        if handler:
+            handler(self, f"Whole system statics: 100 (latest error = {self.residual:g} at Winch Wire, node 86, Z)")
+        if jac < self.jac_needed or g["StaticsMinDamping"] < self.needs:
+            raise RuntimeError("Static calculation failed (Whole system statics: Not converged.)")
+
+
+def test_low_residual_raises_jacobian_before_damping(legacy_inputs):
+    """0.11.2: parada com resíduo < 0,01 -> Jacobiano ×10 (0 -> 1e-3 -> 1e-2) com o mesmo damping."""
+    case = _case(legacy_inputs, statics__robust="sempre", statics__robust_min_damping=10.0,
+                 statics__robust_max_damping=100.0)
+    m = StuckModel(residual=0.004, jac_needed=1e-2)
+    m.objects["General"]["JacobianPerturbationFactor"] = 0.0
+    original = calculate_statics_robust(m, case, "puxada")
+    assert m.runs == [(10.0, 100.0, 0.0), (10.0, 100.0, 1e-3), (10.0, 100.0, 1e-2)]
+    restore_statics_settings(m, original)
+    assert m.objects["General"]["JacobianPerturbationFactor"] == 0.0
+
+
+def test_high_residual_raises_damping(legacy_inputs):
+    """Resíduo alto: sobe o damping (e Jacobiano 1e-3), como antes."""
+    case = _case(legacy_inputs, statics__robust="sempre", statics__robust_min_damping=10.0,
+                 statics__robust_max_damping=100.0)
+    m = StuckModel(residual=0.8, jac_needed=0.0, needs=100)
+    m.objects["General"]["JacobianPerturbationFactor"] = 0.0
+    restore_statics_settings(m, calculate_statics_robust(m, case, "puxada"))
+    assert m.runs[:2] == [(10.0, 100.0, 0.0), (100.0, 1000.0, 1e-3)]
+
+
+def test_low_residual_at_max_jacobian_raises_damping(legacy_inputs):
+    case = _case(legacy_inputs, statics__robust="sempre", statics__robust_min_damping=10.0,
+                 statics__robust_max_damping=100.0)
+    m = StuckModel(residual=0.004, jac_needed=0.0, needs=100)
+    m.objects["General"]["JacobianPerturbationFactor"] = 0.1
+    restore_statics_settings(m, calculate_statics_robust(m, case, "puxada"))
+    assert m.runs[:2] == [(10.0, 100.0, 0.1), (100.0, 1000.0, 0.1)]
+
+
+def test_huge_error_cancels_the_try(legacy_inputs):
+    """0.11.3: 'latest error' > statics.max_error (1e5 desde a 0.11.4) cancela a tentativa; conta como não convergida."""
+    from cvdtools._orcaflex import StaticsDiverged, calculate_statics
+
+    class Diverging(StuckModel):
+        def CalculateStatics(self):
+            g = self.objects["General"]
+            self.runs.append((g["StaticsMinDamping"], g["StaticsMaxDamping"], g.get("JacobianPerturbationFactor")))
+            err = 2e5 if len(self.runs) == 1 else 1e-3
+            self.staticsProgressHandler(self, f"Whole system statics: 24 (latest error = {err:g} at Winch Wire, Z)")
+
+    m = Diverging(residual=0, jac_needed=0)
+    with pytest.raises(StaticsDiverged):
+        calculate_statics(m, "teste", max_error=1e5)
+    case = _case(legacy_inputs, statics__robust="sempre", statics__robust_min_damping=10.0,
+                 statics__robust_max_damping=100.0)
+    m = Diverging(residual=0, jac_needed=0)
+    restore_statics_settings(m, calculate_statics_robust(m, case, "puxada"))
+    assert m.runs[:2] == [(10.0, 100.0, m.runs[0][2]), (100.0, 1000.0, 1e-3)], "erro alto -> sobe o damping"

@@ -116,17 +116,16 @@ def probe_points(obj, orc, candidates=range(0, 4)) -> list[int]:
 
 
 def root_points(model, case: CaseInputs, orc=None) -> list[tuple]:
-    """Pontos "raiz" (fixos, ancorados ou livres) de todos os objetos, exceto os hubs e o MCV B.
+    """Pontos "raiz" (fixos, ancorados ou livres) de todos os objetos, exceto o hub do MCV A.
 
     Pontos conectados a outro objeto (ex.: End B do cabo do guindaste no MCV, lingas no masterlink)
     acompanham o objeto pai e não entram, senão seriam deslocados duas vezes. Devolve
     [(objeto, índice ou None, rótulo, conexão)], índice None quando não há OrcFxAPI para testar.
     """
-    # hubs e o MCV B (fixo no hub B, 2 extremidades) ficam: o vão entre os hubs é dado do layout
-    from .twoends import end_b_support_names
-
-    skip = {case.roles.get("HUB", ""), case.roles.get("HUB_B", ""), case.roles.get("MCV_B", ""),
-            *end_b_support_names(case)} - {""}
+    # 0.11.5: só o hub do MCV A fica; o resto (inclusive MCV B, hub B e o suporte do MCV B, com 2 extremidades)
+    # anda junto, como corpo rígido, e o equilíbrio não muda. Até a 0.11.4 o MCV B ficava: o vão entre os hubs
+    # mudava e o MCV A não chegava ao hub (GLF27: MCV em X = 2,03 m).
+    skip = {case.roles.get("HUB", "")} - {""}
     out = []
     for obj in list(getattr(model, "objects", [])):
         name = getattr(obj, "name", "")

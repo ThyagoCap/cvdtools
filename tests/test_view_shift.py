@@ -63,3 +63,14 @@ def test_shift_uses_moveobjects_with_probed_points(legacy_inputs):
     assert method == "MoveObjects"
     assert moves[0][0] == (-0.583, 0.0, 0.0)
     assert ("Line", 1) in moves[0][1] and ("Crane Wire", 0) in moves[0][1] and len(moves[0][1]) == 5
+
+
+def test_two_ends_moves_mcv_b_and_hub_b_but_not_hub(legacy_inputs):
+    """0.11.5: com 2 extremidades só o 'Hub Height' fica; MCV B e hub B andam com o resto (corpo rígido)."""
+    case = case_from_legacy_json(legacy_inputs)
+    case.roles.update({"HUB_B": "Hub Height B", "MCV_B": "MCV B"})
+    m = model()
+    m.objects += [Obj("MCV B", "6D buoy", Connection="Fixed"), Obj("Hub Height B", "Shape", Connection="Anchored")]
+    pts = root_points(m, case)
+    labels = {label for _, _, label, _ in pts}
+    assert {"MCV B", "Hub Height B", "MCV"} <= labels and "Hub Height" not in labels

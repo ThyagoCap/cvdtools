@@ -54,11 +54,15 @@ class StaticsFailed(RuntimeError):
         super().__init__(text)
 
 
+class StaticsDiverged(StaticsFailed):
+    """Estática cancelada porque o erro passou de ``statics.max_error``: tratada como não convergida."""
+
+
 class StaticsStalled(StaticsFailed):
     """Estática cancelada por falta de progresso (``stall_seconds``): tratada como não convergida."""
 
 
-def calculate_statics(model, label: str = "", stall_seconds: float = 0.0) -> None:
+def calculate_statics(model, label: str = "", stall_seconds: float = 0.0, max_error: float = 0.0) -> None:
     """``model.CalculateStatics()`` que pode ser interrompido com Ctrl+C.
 
     Enquanto a DLL do OrcaFlex calcula, o Python não processa o Ctrl+C. Aqui o
@@ -68,13 +72,17 @@ def calculate_statics(model, label: str = "", stall_seconds: float = 0.0) -> Non
 
     ``stall_seconds`` > 0: cancela (``StaticsStalled``) quando o erro da estática não cai à metade
     em ``stall_seconds`` segundos (0.10.2: a etapa sem corcova parou em 1,7e-3 e andou ~1 it/s).
+
+    ``max_error`` > 0: cancela (``StaticsDiverged``) quando o "latest error" passa desse valor (0.11.3:
+    ``statics.max_error`` = 1e5; 1e4 na 0.11.3); a tentativa é tratada como não convergida.
     """
     import signal
     import threading
 
     from .log import log
 
-    state = {"stop": False, "last": "", "stalled": False, "phase": None, "ref": None, "t_ref": 0.0}
+    state = {"stop": False, "last": "", "stalled": False, "diverged": False, "phase": None, "ref": None,
+             "t_ref": 0.0}
 
     def on_sigint(signum, frame):
         if not state["stop"]:
@@ -96,6 +104,12 @@ def calculate_statics(model, label: str = "", stall_seconds: float = 0.0) -> Non
             if now - state["t"] >= PROGRESS_LOG_INTERVAL:
                 state["t"] = now
                 log.debug("    estática%s: %s", f" ({label})" if label else "", text)
+            if max_error and max_error > 0 and not state["stop"]:
+                _, err = parse_statics_progress(text)
+                if err is not None and err > max_error:
+                    log.warning("  Estática%s com erro %.3g > %g: cancelando a tentativa",
+                                f" ({label})" if label else "", err, max_error)
+                    state["stop"] = state["diverged"] = True
             if stall_seconds and stall_seconds > 0 and not state["stop"]:
                 phase, err = parse_statics_progress(text)
                 if err is not None:
@@ -119,6 +133,8 @@ def calculate_statics(model, label: str = "", stall_seconds: float = 0.0) -> Non
         try:
             model.CalculateStatics()
         except Exception as exc:
+            if state["diverged"]:
+                raise StaticsDiverged(f"erro acima de {max_error:g}", state["last"], state["n"]) from exc
             if state["stalled"]:
                 raise StaticsStalled(f"sem progresso em {stall_seconds:g} s", state["last"], state["n"]) from exc
             if state["stop"]:
@@ -133,6 +149,8 @@ def calculate_statics(model, label: str = "", stall_seconds: float = 0.0) -> Non
                 pass
         if main_thread:
             signal.signal(signal.SIGINT, old)
+    if state["diverged"]:
+        raise StaticsDiverged(f"erro acima de {max_error:g}", state["last"], state["n"])
     if state["stalled"]:   # cancelada, mas o OrcaFlex não levantou exceção
         raise StaticsStalled(f"sem progresso em {stall_seconds:g} s", state["last"], state["n"])
     if state["stop"]:
@@ -313,6 +331,8 @@ class DampingLadder:
         self.iterations = case.num("statics.robust_max_iterations")
         self.start = clamp_damping(case, case.num("statics.robust_min_damping"),
                                    case.num("statics.robust_max_damping"))
+        self.jacobian_max = _case_num(case, "statics.robust_jacobian_max", 0.1)
+        self.low_residual = _case_num(case, "statics.low_residual", 0.01)
         self.jacobian = None          # None = o do modelo; 1e-3 depois de uma subida (só nessa estática)
         self.failed_down = None       # descida que falhou nesta estática (não tenta de novo)
 
@@ -327,6 +347,14 @@ class DampingLadder:
     def up(self, level):
         return clamp_damping(self.case, level[0] * self.factor, level[1] * self.factor)
 
+    def next_jacobian(self, current):
+        """Jacobiano × fator (0 ou abaixo de ``statics.robust_jacobian`` -> ``statics.robust_jacobian``), até
+        ``statics.robust_jacobian_max``. None = já no máximo."""
+        cur = current or 0.0
+        nxt = self.jacobian_up if cur < self.jacobian_up else cur * self.factor
+        nxt = min(nxt, self.jacobian_max)
+        return nxt if nxt > cur * (1 + 1e-9) else None
+
     def remember_converged(self, level) -> None:
         """A próxima estática parte do nível mais baixo que convergiu nesta."""
         self.start = level
@@ -339,8 +367,11 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
     1. Começa em ``ladder.start``: na 1ª estática, ``statics.robust_min_damping``/``robust_max_damping``
        (1e3/1e4), com ``statics.robust_max_iterations`` (50000) iterações; nas seguintes (mesmo ``ladder``,
        p.ex. as avaliações da puxada), no nível mais baixo que já convergiu.
-    2. Não convergiu (ou ficou ``statics.stall_seconds`` sem progresso): damping × ``statics.robust_factor``
-       (10) e Jacobian perturbation factor ``statics.robust_jacobian`` (1e-3), até o teto.
+    2. Não convergiu (ou ficou ``statics.stall_seconds`` sem progresso): se o último resíduo já é menor que
+       ``statics.low_residual`` (0,01), o Jacobian perturbation factor sobe × 10 (de 0 vai a
+       ``statics.robust_jacobian`` = 1e-3; máximo ``statics.robust_jacobian_max`` = 0,1) com o mesmo damping;
+       senão (ou com o Jacobiano no máximo), damping × ``statics.robust_factor`` (10) e Jacobiano de pelo
+       menos 1e-3, até o teto.
     3. Convergiu: grava as posições (UseCalculatedPositions) e desce o damping ÷ 10 (mesmas iterações) até
        o piso. Se uma descida não convergir, volta ao último nível que convergiu (parte das posições dele).
 
@@ -356,7 +387,7 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
     mode = mode or robust_mode(case)
     if mode != "direto":
         try:
-            calculate_statics(model, label)
+            calculate_statics(model, label, max_error=_case_num(case, "statics.max_error", 1e5))
             return None
         except StaticsFailed as exc:
             if mode == "nunca":
@@ -366,6 +397,7 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
 
     ladder = ladder or DampingLadder(case)
     stall = _case_num(case, "statics.stall_seconds", 120.0)
+    max_err = _case_num(case, "statics.max_error", 1e5)
     name = f"{label}, robusta" if label else "robusta"
     factor = ladder.factor
 
@@ -385,20 +417,32 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
         while True:   # subida: só quando não converge
             log.info("  Estática (%s) com %s", label, _describe(model))
             try:
-                calculate_statics(model, name, stall)
+                calculate_statics(model, name, stall, max_err)
                 break
             except StaticsFailed as exc:
-                up = ladder.up(level)
                 jac = ladder.jacobian
                 if jac is None:
                     try:
-                        jac = model.general.JacobianPerturbationFactor
+                        jac = float(model.general.JacobianPerturbationFactor)
                     except Exception:
                         jac = None
-                if up == level and jac is not None and abs(jac - ladder.jacobian_up) <= 1e-12:
+                _, err = parse_statics_progress(exc.last_progress or "")
+                # 0.11.2: resíduo já baixo e parado -> sobe o Jacobiano (× fator) antes de subir o damping
+                if err is not None and err < ladder.low_residual:
+                    more = ladder.next_jacobian(jac)
+                    if more is not None:
+                        ladder.jacobian = more
+                        log.warning("  Estática (%s) parou com resíduo baixo (%.3g < %g; %s); Jacobiano %g, damping "
+                                    "mantido (%g a %g)", label, err, ladder.low_residual, exc.orcaflex_message,
+                                    more, level[0], level[1])
+                        apply(level)
+                        continue
+                up = ladder.up(level)
+                new_jac = max(jac or 0.0, ladder.jacobian_up)
+                if up == level and jac is not None and abs(jac - new_jac) <= 1e-12:
                     raise   # já no teto de damping, com o Jacobiano da subida
                 level = up
-                ladder.jacobian = ladder.jacobian_up
+                ladder.jacobian = new_jac
                 log.warning("  Estática (%s) não convergiu (%s); damping × %g (limitado: %g a %g) e Jacobiano %g",
                             label, exc.orcaflex_message, factor, level[0], level[1], ladder.jacobian)
                 apply(level)
@@ -412,7 +456,7 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
             apply(lower)
             log.info("  Estática (%s) convergiu; descendo o damping ÷ %g: %s", label, factor, _describe(model))
             try:
-                calculate_statics(model, f"{name}, damping {lower[0]:g} a {lower[1]:g}", stall)
+                calculate_statics(model, f"{name}, damping {lower[0]:g} a {lower[1]:g}", stall, max_err)
                 level = lower
             except StaticsFailed as exc:
                 log.warning("  Estática (%s) com damping %g a %g não convergiu (%s); de volta a %g a %g",
@@ -420,7 +464,7 @@ def calculate_statics_robust(model, case, label: str = "", mode: str | None = No
                 if ladder.failed_down is None or lower[0] > ladder.failed_down[0]:
                     ladder.failed_down = lower
                 apply(level)
-                calculate_statics(model, name, stall)   # parte das posições do nível que convergiu
+                calculate_statics(model, name, stall, max_err)   # parte das posições do nível que convergiu
                 break
         ladder.remember_converged(level)
     except BaseException:

@@ -7,6 +7,8 @@ O que faz, sem nunca apagar nem sobrescrever trabalho do usuário:
 2. ``cvd_config.xlsx``: cria com os padrões ou, se já existe, acrescenta os parâmetros novos
    (``config upgrade``, com .bak).
 3. ``cvd_curves.xlsx``: cria a biblioteca de curvas vazia, se não existe.
+   Com ``--config-from <pasta>``, configuração e curvas que faltam são copiadas de outra pasta de projeto
+   (padrão do projeto para toda a equipe).
 4. ``scripts/``: um script por etapa (``00_caso.py``, ``01_...``). Script que o usuário editou não é
    trocado: a versão nova fica ao lado como ``<nome>.novo.py``.
 5. ``.vscode/settings.json``: aponta o VS Code para o Python em que o cvdtools está instalado.
@@ -107,8 +109,10 @@ def _rel(target: Path, start: Path) -> str:
 
 class Setup:
     def __init__(self, folder: Path, ask: Callable[[str, str], str], say: Callable[[str], None] = print,
-                 workbook: Optional[str] = None, code: Optional[str] = None, vscode: bool = True):
+                 workbook: Optional[str] = None, code: Optional[str] = None, vscode: bool = True,
+                 config_from: Optional[str] = None):
         self.folder = Path(folder).resolve()
+        self.config_from = _source_folder(config_from) if config_from else None
         self.ask, self.say = ask, say
         self.workbook_arg, self.code_arg, self.vscode = workbook, code, vscode
         self.notes: list[str] = []
@@ -187,7 +191,9 @@ class Setup:
         from .io.config import default_config, upgrade_config, write_config
 
         path = (self.folder / project.get("config", "cvd_config.xlsx")).resolve()
-        if not path.is_file():
+        if not path.is_file() and self._copy_from(path.name, path):
+            pass
+        elif not path.is_file():
             write_config(default_config(None), path)
             self.say(f"  {path.name}: criado com os padrões (revise as abas Defaults, Papéis e Mares)")
             self.notes.append(f"Revise o {path.name}: nomes dos objetos do modelo base (aba Papéis), padrões do "
@@ -211,9 +217,25 @@ class Setup:
             path = (self.folder / name).resolve()
             if path.is_file():
                 self.say(f"  {path.name}: já existe (mantido)")
+            elif self._copy_from(Path(name).name, path):
+                pass
             else:
                 write_curve_template(path, [])
                 self.say(f"  {path.name}: criado vazio (curvas de histerese e rigidez axial)")
+
+    def _copy_from(self, name: str, dest: Path) -> bool:
+        """Copia ``name`` da pasta de projeto de referência (``--config-from``), se houver."""
+        if not self.config_from:
+            return False
+        src = self.config_from / name
+        if not src.is_file():
+            self.notes.append(f"--config-from: {src} não existe; {dest.name} criado com os padrões.")
+            return False
+        import shutil
+
+        shutil.copy2(src, dest)
+        self.say(f"  {dest.name}: copiado de {src}")
+        return True
 
     # 4 ---------------------------------------------------------------- scripts
     def scripts(self) -> None:
@@ -285,6 +307,63 @@ class Setup:
         self.say(f"  .vscode/settings.json: VS Code usa {sys.executable}")
 
 
+def _source_folder(path: str) -> Path:
+    p = Path(path).expanduser().resolve()
+    return p.parent if p.is_file() else p
+
+
+def refresh_scripts_if_outdated(scripts_dir: Path, say: Callable[[str], None] = print) -> bool:
+    """Scripts gerados por outra versão do cvdtools: atualiza os não editados (como o ``setup``). True se mudou.
+
+    Chamado pelos scripts (``api.ler_caso``): depois de atualizar o cvdtools, a pasta fica no padrão da versão
+    instalada sem o usuário precisar lembrar do ``setup``.
+    """
+    state_path = Path(scripts_dir) / STATE_FILE
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if state.get("version") == __version__:
+        return False
+    old = state.get("version", "?")
+    s = Setup(Path(scripts_dir).parent, ask=lambda q, d: d, say=lambda m: None, vscode=False)
+    s.scripts()
+    say(f"cvdtools {__version__} (scripts eram da {old}): scripts atualizados."
+        + "".join(f"\n  ! {n}" for n in s.notes)
+        + "\n  Para acrescentar os parâmetros novos ao cvd_config.xlsx: python -m cvdtools setup")
+    return True
+
+
+def update(folder: Optional[str] = None, ref: str = "", setup: bool = True) -> int:
+    """``python -m cvdtools update``: instala a versão do GitHub (``ref``: tag ou branch) e roda o ``setup``."""
+    import subprocess
+
+    try:
+        from importlib.metadata import distribution
+
+        info = json.loads(distribution("cvdtools").read_text("direct_url.json") or "{}")
+    except Exception:
+        info = {}
+    if info.get("dir_info", {}).get("editable"):
+        print("cvdtools instalado em modo de desenvolvimento (pip install -e): atualize com 'git pull' na pasta do "
+              f"código ({info.get('url', '')}).")
+        return 1
+    url = repo_url()
+    spec = f"cvdtools[orcaflex] @ git+{url}" + (f"@{ref}" if ref else "")
+    print(f"Instalando {spec} ...")
+    rc = subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade", spec])
+    if rc != 0:
+        print("A instalação falhou (veja as mensagens acima). Confira o login do GitHub e o Git for Windows.")
+        return rc
+    target = Path(folder).resolve() if folder else Path.cwd()
+    if setup and (target / PROJECT_FILE).is_file():
+        # processo novo: roda o setup da versão recém-instalada
+        return subprocess.call([sys.executable, "-m", "cvdtools", "setup", "--folder", str(target)])
+    if setup:
+        print(f"Sem {PROJECT_FILE} em {target}: rode 'python -m cvdtools setup' na pasta do projeto.")
+    return 0
+
+
 def _console_ask(question: str, default: str) -> str:
     suffix = f" [{default}]" if default else ""
     try:
@@ -295,5 +374,7 @@ def _console_ask(question: str, default: str) -> str:
 
 
 def run_setup(folder: Optional[str] = None, workbook: Optional[str] = None, code: Optional[str] = None,
-              vscode: bool = True, ask: Callable[[str, str], str] = _console_ask) -> int:
-    return Setup(Path(folder) if folder else Path.cwd(), ask, workbook=workbook, code=code, vscode=vscode).run()
+              vscode: bool = True, ask: Callable[[str, str], str] = _console_ask,
+              config_from: Optional[str] = None) -> int:
+    return Setup(Path(folder) if folder else Path.cwd(), ask, workbook=workbook, code=code, vscode=vscode,
+                 config_from=config_from).run()

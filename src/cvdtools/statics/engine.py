@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from .._orcaflex import (DampingLadder, robust_mode, use_calculated_positions, calculate_statics,
+from .._orcaflex import (DampingLadder, StaticsFailed, robust_mode, use_calculated_positions, calculate_statics,
                          calculate_statics_robust, require_orcfxapi,
                          restore_statics_settings)
 from ..schema import CaseInputs, MissingInputError
@@ -101,6 +101,8 @@ class StaticsEngine:
         if self.ml_name and case.flag("statics.masterlink_fixed_first") is False:
             self.ml_name = ""
         self.ladder_fixed = DampingLadder(case) if self.ladder is not None and self.ml_name else None
+        self._ml_settled = False   # 0.11.2: masterlink fixo só até a 1ª estática com ele livre convergir
+        self._converged_length = None   # 0.11.3: ponto de partida dos passos de cabo (lido depois do wire)
         self.static = self.orc.Period(self.orc.PeriodNum.StaticState)
         self.log: list[Evaluation] = []
         self.state = ""
@@ -123,6 +125,7 @@ class StaticsEngine:
             self.control = (name, prop, n + idx)
         log.info("Controle da puxada: %s.%s[%s]", *self.control)
         self.L_built = float(self._get_control())
+        self._converged_length = self.L_built
         self._states = {FIXED: parse_state(self._text("statics.mcv_fixed_state")),
                         FREE: parse_state(self._text("statics.mcv_free_state"))}
         self._check_objects()
@@ -160,7 +163,10 @@ class StaticsEngine:
 
     def _reload(self, source: Path) -> None:
         self.model = self.orc.Model(str(source))
+        # formas salvas pelo motor já convergiram com o masterlink livre; só o modelo montado não
+        self._ml_settled = Path(source).resolve() != Path(self.model_path).resolve()
         self.wire = self.model[self.control[0]]
+        self._converged_length = self._read_length()   # formas salvas: o comprimento em que convergiram
         self.state = ""          # força set_state a reaplicar o estado do MCV
         self._limit_iterations()
 
@@ -296,6 +302,8 @@ class StaticsEngine:
         t = time.perf_counter()
         robust = None
         try:
+            self._step_towards(purpose, length)
+            self.set_length(length)
             robust = self._statics(f"{purpose}, cabo {length:.3f} m")
         except Exception as exc:  # não convergência
             ev.error = str(exc).strip().splitlines()[-1] if str(exc).strip() else type(exc).__name__
@@ -304,6 +312,11 @@ class StaticsEngine:
                         length, "-" if math.isnan(pull) else f"{pull:.3f}", time.perf_counter() - t, ev.error)
             return ev
         ev.converged = True
+        self._converged_length = length
+        if self.ml_name and not self._ml_settled:
+            self._ml_settled = True
+            log.info("  Masterlink resolvido (estática com ele livre convergiu): as próximas estáticas mudam o cabo "
+                     "com o masterlink livre")
         try:
             ev.link_tension = self.link_tension()
             ev.angle = self.angle()
@@ -335,9 +348,42 @@ class StaticsEngine:
             log.warning("  [%s] %s", purpose, ev.error)
         return ev
 
+    def _read_length(self):
+        try:
+            return float(self._get_control())
+        except Exception:
+            return None
+
+    def _step_towards(self, purpose: str, target: float) -> None:
+        """0.11.3: muda o cabo no máximo ``statics.max_length_step`` (0,5 m) por estática.
+
+        Entre o último comprimento convergido e ``target``, roda estáticas intermediárias em passos
+        iguais, cada uma partindo da anterior (UseCalculatedPositions). Uma que não converge faz a
+        avaliação inteira falhar.
+        """
+        cap = self._max_step()
+        start = self._converged_length
+        if not cap or cap <= 0 or start is None or abs(target - start) <= cap + 1e-9:
+            return
+        n = int(math.ceil(abs(target - start) / cap - 1e-9))
+        log.info("  Cabo de %.3f para %.3f m em %d passos de até %g m", start, target, n, cap)
+        for i in range(1, n):
+            step = start + (target - start) * i / n
+            self.set_length(step)
+            try:
+                robust = self._statics(f"{purpose}, passo {i}/{n}, cabo {step:.3f} m")
+            except StaticsFailed as exc:
+                raise StaticsFailed(f"passo intermediário {i}/{n} (cabo {step:.3f} m) não convergiu: "
+                                    f"{exc.orcaflex_message}", exc.last_progress) from exc
+            use_calculated_positions(self.model)
+            restore_statics_settings(self.model, robust)
+            self._converged_length = step
+
     def _statics(self, label: str):
-        """Estática da avaliação. Com corcova: masterlink fixo na posição atual -> posições gravadas ->
-        masterlink com a conexão original -> estática. Devolve os valores originais de General."""
+        """Estática da avaliação. Com corcova, enquanto o masterlink não estiver resolvido (nenhuma estática com
+        ele livre convergiu desde o modelo montado): masterlink fixo na posição atual -> posições gravadas ->
+        masterlink com a conexão original -> estática. Depois, só a estática com ele livre (0.11.2: mudar o
+        cabo com o masterlink fixo não faz sentido). Devolve os valores originais de General."""
         ml = None
         if self.ml_name:
             try:
@@ -346,7 +392,7 @@ class StaticsEngine:
             except Exception as exc:
                 log.debug("  Masterlink '%s' indisponível (%s): estática direta", self.ml_name, exc)
                 ml = None
-        if ml is None or original == "Fixed":
+        if ml is None or original == "Fixed" or self._ml_settled:
             return calculate_statics_robust(self.model, self.case, label, ladder=self.ladder)
         ml.Connection = "Fixed"
         try:
@@ -365,13 +411,27 @@ class StaticsEngine:
             log.debug("  Posições com o masterlink fixo gravadas; masterlink de volta a '%s'", original)
         return calculate_statics_robust(self.model, self.case, f"{label}, masterlink livre", ladder=self.ladder)
 
-    def _search(self, purpose: str, state: str, fn, length_of) -> Search:
+    def _search(self, purpose: str, state: str, fn, length_of, ftol=None) -> Search:
         def f(x: float) -> float:
             ev = self.evaluate(purpose, state, length_of(x))
             return fn(ev) if ev.converged else float("nan")
 
+        # 0.11.6: passo máximo de cabo dentro da própria busca (cada passo avaliado; ver Search.eval)
+        cap = self._max_step()
+        l0, l1 = length_of(0.0), length_of(1.0)
+
+        def current():
+            if self._converged_length is None or l1 == l0:
+                return None
+            return (self._converged_length - l0) / (l1 - l0)
+
         return Search(f, xtol=self.case.num("statics.pull_tolerance"),
-                      max_evals=int(self.case.num("statics.max_evaluations")))
+                      max_evals=int(self.case.num("statics.max_evaluations")), ftol=ftol,
+                      max_step=cap or None, current=current if cap else None)
+
+    def _max_step(self) -> float:
+        v = self.case.get("statics.max_length_step")
+        return float(v) if v not in (None, "") else 0.5
 
     # ------------------------------------------------------------------ referência (substitui o _02)
     def find_reference(self) -> float:
@@ -442,7 +502,12 @@ class StaticsEngine:
                     return max(terms)
         else:
             raise ValueError(f"Alvo desconhecido: {target}")
-        s = self._search(purpose, state, fn, self.pull_to_length)
+        # 0.11.5: alvo de ângulo para em |Δângulo| <= statics.angle_tolerance (0,005°), não só na tolerância da puxada
+        ftol = None
+        if target == "angle":
+            v = self.case.get("statics.angle_tolerance")
+            ftol = float(v) if v not in (None, "") else 0.005
+        s = self._search(purpose, state, fn, self.pull_to_length, ftol=ftol)
         lo, hi = 0.0, self.case.num("statics.pull_max")
         if target in ("uf", "uf_or_angle"):
             f0 = s.eval(start)
@@ -498,7 +563,11 @@ class StaticsEngine:
                      k + 1, crane, pull, abs(dz), "acima" if dz > 0 else "abaixo")
             if abs(dz) <= tol_z:
                 break
-            crane += dz          # MCV alto -> solta cabo do guindaste
+            cap = self._max_step()   # 0.11.6: cabo do guindaste também muda no máximo max_length_step
+            step_dz = max(-cap, min(cap, dz)) if cap else dz
+            if step_dz != dz:
+                log.info("  Correção do cabo do guindaste limitada a %+.3f m (diferença %.3f m)", step_dz, dz)
+            crane += step_dz     # MCV alto -> solta cabo do guindaste
         else:
             raise NotBracketed(f"MCV não chegou à altura do hub em {k + 1} iterações (diferença {dz:.3f} m)")
         # alinha o MCV com o hub em X transladando o modelo (comentário do usuário, 18/11/2026)
@@ -529,12 +598,37 @@ class StaticsEngine:
         if math.isnan(x):
             log.warning("  X do MCV não disponível na avaliação: modelo não alinhado com o hub")
             return ev
-        dx = hub_x(self.model, self.case) - x
-        if abs(dx) <= self.case.num("statics.height_tolerance"):
+        target = hub_x(self.model, self.case)
+        v = self.case.get("statics.align_tolerance")
+        tol = float(v) if v not in (None, "") else 0.001
+        ev2 = ev
+        for k in range(3):   # 0.11.5: repete até o MCV ficar a <= statics.align_tolerance do hub
+            x = ev2.mcv_x
+            if math.isnan(x):
+                break
+            dx = target - x
+            if abs(dx) <= tol:
+                break
+            ev2 = self._shift_once(purpose, pull, dx, x, k)
+        if not math.isnan(ev2.mcv_x):
+            log.info("  Depois da translação: MCV em X = %.4f m (hub em %.4f m; tolerância %g m)", ev2.mcv_x,
+                     target, tol)
+        if ev2 is ev:
             return ev
+        # formas de partida antigas ficaram na posição anterior: a base passa a ser o modelo alinhado
+        base = self._shape_dir / "horizontal_alinhado.dat"
+        self.model.SaveData(str(base))
+        self._reload_base = base
+        self._shapes = {FREE: self._shapes.get(FREE, base)}
+        return ev2
+
+    def _shift_once(self, purpose: str, pull: float, dx: float, x: float, k: int) -> Evaluation:
+        from ..model.view import shift_model_x
+
         method = shift_model_x(self.model, self.case, dx, self.orc)
         self.x_shift += dx
-        log.info("  Modelo transladado %.3f m em X (MCV em X = %.3f m -> hub) por %s", dx, x, method)
+        log.info("  Modelo transladado %.4f m em X (MCV em X = %.4f m -> hub) por %s%s", dx, x, method,
+                 f" (correção {k})" if k else "")
         ev2 = self.at(f"{purpose} (alinhado com o hub)", FREE, pull)
         if not ev2.converged:
             # as formas iniciais gravadas ("User specified") podem não ter acompanhado a translação:
@@ -545,13 +639,6 @@ class StaticsEngine:
             ev2 = self.at(f"{purpose} (alinhado com o hub, forma recalculada)", FREE, pull)
         if not ev2.converged:
             raise NotBracketed("Estática não converge depois de transladar o modelo para alinhar o MCV com o hub")
-        if not math.isnan(ev2.mcv_x):
-            log.info("  Depois da translação: MCV em X = %.3f m (hub em %.3f m)", ev2.mcv_x, hub_x(self.model, self.case))
-        # formas de partida antigas ficaram na posição anterior: a base passa a ser o modelo alinhado
-        base = self._shape_dir / "horizontal_alinhado.dat"
-        self.model.SaveData(str(base))
-        self._reload_base = base
-        self._shapes = {FREE: self._shapes.get(FREE, base)}
         return ev2
 
     def _has_object(self, name: str) -> bool:

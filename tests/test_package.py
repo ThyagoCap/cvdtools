@@ -6,7 +6,7 @@ from cvdtools.cli import main
 
 
 def test_version():
-    assert cvdtools.__version__ == "0.11.1"
+    assert cvdtools.__version__ == "0.12.1"
 
 
 def test_import_without_orcaflex():

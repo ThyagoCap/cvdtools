@@ -60,7 +60,14 @@ def _counts(results) -> dict:
 def _cmd_setup(args) -> int:
     from .setup_project import run_setup
 
-    return run_setup(args.folder, args.workbook_path, args.code, vscode=not args.no_vscode)
+    return run_setup(args.folder, args.workbook_path, args.code, vscode=not args.no_vscode,
+                     config_from=args.config_from)
+
+
+def _cmd_update(args) -> int:
+    from .setup_project import update
+
+    return update(args.folder, args.ref, setup=not args.no_setup)
 
 
 def _cmd_project_init(args) -> int:
@@ -307,6 +314,24 @@ def _cmd_seastates(args) -> int:
             print(f"Simulações: {sum(r.status == 'OK' for r in res)} OK, {sum(r.status == 'FALHOU' for r in res)} "
                   f"falharam (run_log.csv)")
     return 0
+
+
+def _cmd_dynbase(args) -> int:
+    from .dynamics.dynbase import make_dynamic_base
+    from .log import log_to_file
+    from .pipeline import case_output_dir, load_case
+
+    proj = _project(args)
+    case = load_case(proj, args.id)
+    case_dir = case_output_dir(proj, case, args.out)
+    with log_to_file(case_dir / "cvd_dynbase.log"):
+        dyn = make_dynamic_base(case, case_dir, case.operation_name, Path(args.source) if args.source else None,
+                                args.position, check_statics=not args.no_check)
+    print(f"Modelo dinâmico base: {dyn}")
+    if not args.seastates:
+        return 0
+    args.base_dyn, args.out = str(dyn), str(case_dir / "02.Dynamic")
+    return _cmd_seastates(args)
 
 
 def _cmd_run(args) -> int:
@@ -784,7 +809,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workbook", dest="workbook_path", help="Planilha geral (padrão: procura a aba 'Input Sheet')")
     p.add_argument("--code", help="Código do projeto (padrão: o número no início do nome da planilha)")
     p.add_argument("--no-vscode", action="store_true", help="Não cria/altera .vscode/settings.json")
+    p.add_argument("--config-from", help="Pasta de projeto de referência: copia cvd_config.xlsx e cvd_curves.xlsx "
+                                         "que faltarem")
     p.set_defaults(func=_cmd_setup)
+
+    p = sub.add_parser("update", aliases=["atualizar"],
+                       help="Atualiza o cvdtools pelo GitHub e roda o setup na pasta de projeto")
+    p.add_argument("--folder", help="Pasta do projeto (padrão: a pasta atual)")
+    p.add_argument("--ref", default="", help="Tag ou branch (padrão: main), ex.: v0.12.1")
+    p.add_argument("--no-setup", action="store_true")
+    p.set_defaults(func=_cmd_update)
 
     proj = sub.add_parser("project", help="Arquivo de projeto").add_subparsers(dest="sub")
     p = proj.add_parser("init", help="Cria cvd_project.json na pasta atual")
@@ -886,6 +920,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--threads", type=int, default=1, help="Threads do OrcaFlex por simulação (com --run)")
     p.add_argument("--overwrite", action="store_true")
     p.set_defaults(func=_cmd_seastates)
+
+    p = sub.add_parser("dynbase", parents=[common],
+                       help="Modelo dinâmico base (<nome>_dyn.dat) a partir de uma posição estática: MCV ancorado, "
+                            "sem cabo do guindaste; com --seastates, já gera os estados de mar")
+    p.add_argument("id")
+    p.add_argument("--position", default="01.Horizontal", help="Posição de partida (padrão: 01.Horizontal)")
+    p.add_argument("--source", help="Arquivo de partida (.sim ou .dat) em vez da posição")
+    p.add_argument("--out", help="Pasta do caso (padrão: a do build)")
+    p.add_argument("--no-check", action="store_true", help="Não confere a estática do modelo dinâmico")
+    p.add_argument("--seastates", action="store_true", help="Gera os estados de mar em <caso>/02.Dynamic")
+    p.add_argument("--regular", action="store_true")
+    p.add_argument("--run", action="store_true", help="Com --seastates: roda as simulações em seguida")
+    p.add_argument("--workers", type=int)
+    p.add_argument("--threads", type=int, default=1)
+    p.add_argument("--overwrite", action="store_true", help="Sobrescreve os estados de mar já gerados")
+    p.set_defaults(func=_cmd_dynbase)
 
     p = sub.add_parser("run", parents=[common],
                        help="Roda simulações dinâmicas em paralelo (um processo por simulação)")

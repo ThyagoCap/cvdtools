@@ -108,8 +108,20 @@ def test_scripts_run_the_pipeline(project, tmp_path, fake_orc, legacy_inputs, ca
     assert "Modelo montado" in capsys.readouterr().out
 
     # etapa que depende de um arquivo que ainda não existe: erro com a dica do que fazer
-    with pytest.raises(api.CvdError, match="Modelo dinâmico base"):
+    with pytest.raises(api.CvdError, match="Pasta das posições"):
         runpy.run_path(str(scripts / "04_estados_de_mar.py"), run_name="__main__")
+
+    # 0.12.0: com a posição 01.Horizontal salva, o 04 cria o <nome>_dyn.dat e gera os estados de mar
+    from fake_orcfxapi import FakeModel
+
+    pos = paths.pasta / "01.Positions"
+    pos.mkdir()
+    FakeModel(str(paths.modelo)).SaveData(str(pos / "01.Horizontal.dat"))
+    script = (scripts / "04_estados_de_mar.py").read_text(encoding="utf-8").replace("SIMULTANEAS = None", "SIMULTANEAS = 1")
+    (scripts / "04_estados_de_mar.py").write_text(script, encoding="utf-8")
+    runpy.run_path(str(scripts / "04_estados_de_mar.py"), run_name="__main__")
+    assert paths.modelo_dinamico.is_file()
+    assert (paths.dinamica / "manifest.csv").is_file() and list(paths.dinamica.glob("*.dat"))
 
 
 def test_api_errors_are_cvd_errors(project, monkeypatch):
@@ -120,3 +132,59 @@ def test_api_errors_are_cvd_errors(project, monkeypatch):
     monkeypatch.setattr(api, "_PROJECT_FILE", None)
     with pytest.raises(api.CvdError, match="cvd_project.json"):
         api.usar_projeto(project.parent.parent)
+
+
+def test_scripts_refresh_after_library_update(project, capsys):
+    """0.12.1: scripts gerados por outra versão são atualizados quando um script roda (sem o usuário rodar setup)."""
+    import cvdtools.setup_project as sp
+
+    scripts = project / "scripts"
+    state = json.loads((scripts / ".cvd_scripts.json").read_text(encoding="utf-8"))
+    state["version"] = "0.0.1"
+    old = scripts / "05_rodar_simulacoes.py"
+    state["hashes"]["05_rodar_simulacoes.py"] = sp._sha("# versão antiga\n")
+    old.write_text("# versão antiga\n", encoding="utf-8")
+    (scripts / ".cvd_scripts.json").write_text(json.dumps(state), encoding="utf-8")
+    assert sp.refresh_scripts_if_outdated(scripts)
+    assert "scripts atualizados" in capsys.readouterr().out
+    assert "rodar_simulacoes" in old.read_text(encoding="utf-8")
+    assert not sp.refresh_scripts_if_outdated(scripts), "mesma versão: nada a fazer"
+
+
+def test_setup_copies_config_from_reference_project(project, tmp_path):
+    """0.12.1: --config-from copia cvd_config.xlsx e cvd_curves.xlsx do projeto de referência."""
+    ref_config = (project / "cvd_config.xlsx").read_bytes()
+    new = tmp_path / "outro"
+    new.mkdir()
+    assert run_setup(str(new), ask=NO, vscode=False, config_from=str(project)) == 0
+    assert (new / "cvd_config.xlsx").read_bytes() == ref_config
+    assert (new / "cvd_curves.xlsx").is_file()
+
+
+def test_update_installs_from_github_then_runs_setup(project, monkeypatch):
+    import subprocess
+
+    import cvdtools.setup_project as sp
+
+    calls = []
+    monkeypatch.setattr(subprocess, "call", lambda cmd: calls.append(cmd) or 0)
+    monkeypatch.setattr(sp, "repo_url", lambda: "https://github.com/ThyagoCap/cvdtools.git")
+
+    class Dist:
+        def read_text(self, name):
+            return json.dumps({"url": "https://github.com/ThyagoCap/cvdtools.git", "vcs_info": {"vcs": "git"}})
+
+    import importlib.metadata as md
+
+    monkeypatch.setattr(md, "distribution", lambda name: Dist())
+    assert sp.update(str(project), ref="v0.12.1") == 0
+    assert calls[0][-1] == "cvdtools[orcaflex] @ git+https://github.com/ThyagoCap/cvdtools.git@v0.12.1"
+    assert calls[1][-3:] == ["setup", "--folder", str(project.resolve())]
+
+    class Editable(Dist):
+        def read_text(self, name):
+            return json.dumps({"url": "file:///c/new_code", "dir_info": {"editable": True}})
+
+    monkeypatch.setattr(md, "distribution", lambda name: Editable())
+    calls.clear()
+    assert sp.update(str(project)) == 1 and calls == [], "instalação -e: não mexe (git pull)"
