@@ -100,7 +100,9 @@ class StaticsEngine:
         self.ml_name = case.roles.get("MASTERLINK", "") if case.operation.camelback else ""
         if self.ml_name and case.flag("statics.masterlink_fixed_first") is False:
             self.ml_name = ""
-        self.ladder_fixed = DampingLadder(case) if self.ladder is not None and self.ml_name else None
+        # 0.13.1: uma escada só. A estática com o masterlink livre parte do nível em que a fixa convergiu (antes
+        # cada uma tinha a sua, e a livre voltava a 1e3/1e4 logo depois de a fixa ter descido a 10/100)
+        self.ladder_fixed = self.ladder
         self._ml_settled = False   # 0.11.2: masterlink fixo só até a 1ª estática com ele livre convergir
         self._converged_length = None   # 0.11.3: ponto de partida dos passos de cabo (lido depois do wire)
         self.static = self.orc.Period(self.orc.PeriodNum.StaticState)

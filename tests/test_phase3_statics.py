@@ -337,6 +337,31 @@ def test_each_statics_starts_with_fixed_masterlink(built_case, fake_orc):
     assert seen[0] == ("statics", original) and ("statics", "Fixed") not in seen
 
 
+def test_free_masterlink_statics_starts_where_fixed_converged(built_case, fake_orc):
+    """0.13.1: a estática com o masterlink livre parte do damping em que a fixa convergiu (escada única)."""
+    seen = []
+
+    class Recorder(PhysicsModel):
+        def CalculateStatics(self):
+            g = self.objects["General"]
+            seen.append((self.objects["Masterlink"]["Connection"], g["StaticsMinDamping"], g["StaticsMaxDamping"]))
+            super().CalculateStatics()
+
+    case, path = built_case
+    case.values["statics.robust"] = ResolvedValue("sempre", "override")
+    fake_orc.Model = Recorder
+    eng = StaticsEngine(case, path)
+    assert eng.evaluate("teste", "fixed", eng.L_built).converged
+    fixed = [s for s in seen if s[0] == "Fixed"]
+    free = [s for s in seen if s[0] != "Fixed"]
+    assert fixed[0][1:] == (1000.0, 10000.0) and fixed[-1][1:] == (10.0, 100.0)
+    assert free[0][1:] == (10.0, 100.0)          # não volta a 1e3/1e4
+    # próximo comprimento de cabo: parte do nível mais baixo que convergiu
+    seen.clear()
+    assert eng.evaluate("teste", "fixed", eng.L_built - 0.5).converged
+    assert seen[0][1:] == (10.0, 100.0)
+
+
 def test_cable_changes_in_steps_of_at_most_max_length_step(built_case, fake_orc):
     """0.11.3: o cabo muda no máximo statics.max_length_step (0,5 m) por estática."""
     lengths = []
