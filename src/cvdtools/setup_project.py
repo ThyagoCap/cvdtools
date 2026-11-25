@@ -3,7 +3,9 @@
 O que faz, sem nunca apagar nem sobrescrever trabalho do usuário:
 
 1. ``cvd_project.json``: acha a planilha geral (aba "Input Sheet") e a pasta ``00.Base`` nesta pasta
-   ou nas de cima; pergunta só o que não conseguir deduzir.
+   ou nas de cima; pergunta só o que não conseguir deduzir. Com ``--base-repo <endereço git>`` (ou herdado
+   do ``cvd_project.json`` do ``--config-from``), o modelo base vem desse repositório, baixado/atualizado em
+   ``.cvd_base`` a cada setup (e update).
 2. ``cvd_config.xlsx``: cria com os padrões ou, se já existe, acrescenta os parâmetros novos
    (``config upgrade``, com .bak).
 3. ``cvd_curves.xlsx``: cria a biblioteca de curvas vazia, se não existe.
@@ -110,17 +112,21 @@ def _rel(target: Path, start: Path) -> str:
 class Setup:
     def __init__(self, folder: Path, ask: Callable[[str, str], str], say: Callable[[str], None] = print,
                  workbook: Optional[str] = None, code: Optional[str] = None, vscode: bool = True,
-                 config_from: Optional[str] = None):
+                 config_from: Optional[str] = None, base_repo: Optional[str] = None,
+                 base_ref: Optional[str] = None):
         self.folder = Path(folder).resolve()
         self.config_from = _source_folder(config_from) if config_from else None
         self.ask, self.say = ask, say
         self.workbook_arg, self.code_arg, self.vscode = workbook, code, vscode
+        self.base_repo_arg = (base_repo or "").strip() or None
+        self.base_ref_arg = base_ref.strip() if base_ref is not None else None
         self.notes: list[str] = []
 
     def run(self) -> int:
         self.say(f"cvdtools {__version__}: preparando {self.folder}")
         self.folder.mkdir(parents=True, exist_ok=True)
         project = self.project_file()
+        self.base_model(project)
         self.config(project)
         self.curves(project)
         self.scripts()
@@ -143,22 +149,65 @@ class Setup:
             if wb is None or not wb.is_file():
                 self.notes.append(f"A planilha geral do {PROJECT_FILE} não foi encontrada ({wb}). Corrija o "
                                   "campo 'workbook' no arquivo.")
+            if self.base_repo_arg or self.base_ref_arg is not None:
+                repo = self.base_repo_arg or data.get("base_repo", "")
+                ref = self.base_ref_arg if self.base_ref_arg is not None else data.get("base_ref", "")
+                if (repo, ref) != (data.get("base_repo", ""), data.get("base_ref", "")):
+                    data["base_repo"], data["base_ref"] = repo, ref
+                    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    self.say(f"  {PROJECT_FILE}: modelo base passa a vir de {repo}" + (f" ({ref})" if ref else ""))
             return data
         wb = self._choose_workbook()
         code = self.code_arg if self.code_arg is not None else guess_project_code(wb)
         if not code:
             code = self.ask("Código do projeto (prefixo dos nomes dos arquivos, ex.: 1327; Enter = nenhum)", "")
-        base = find_base_dir(self.folder)
-        if base is None:
+        repo, ref = self._base_repo_choice()
+        base = None if repo else find_base_dir(self.folder)
+        if base is None and not repo:
             self.notes.append("Não achei a pasta 00.Base (modelo base do OrcaFlex) nesta pasta nem nas de cima. "
-                              f"Ajuste 'base_dir' no {PROJECT_FILE} e a coluna 'Modelo base' da aba Operações.")
+                              f"Ajuste 'base_dir' no {PROJECT_FILE} (ou use 'setup --base-repo <endereço git>') e a "
+                              "coluna 'Modelo base' da aba Operações.")
         data = {"project_code": code, "workbook": _rel(wb, self.folder), "config": "cvd_config.xlsx",
                 "analysis_root": "", "base_dir": _rel(base, self.folder) if base else ".",
                 "curves": ["cvd_curves.xlsx"]}
+        if repo:
+            data.update(base_repo=repo, base_ref=ref)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        self.say(f"  {PROJECT_FILE}: criado (planilha {wb.name}, código '{code}', 00.Base em "
-                 f"{base if base else '?'})")
+        where = f"repositório {repo}" if repo else f"00.Base em {base if base else '?'}"
+        self.say(f"  {PROJECT_FILE}: criado (planilha {wb.name}, código '{code}', {where})")
         return data
+
+    def _base_repo_choice(self) -> tuple[str, str]:
+        """Repositório do modelo base: o de ``--base-repo`` ou o do projeto de referência (``--config-from``)."""
+        if self.base_repo_arg:
+            return self.base_repo_arg, self.base_ref_arg or ""
+        if self.config_from and (self.config_from / PROJECT_FILE).is_file():
+            try:
+                ref_data = json.loads((self.config_from / PROJECT_FILE).read_text(encoding="utf-8"))
+            except ValueError:
+                return "", ""
+            repo = str(ref_data.get("base_repo") or "").strip()
+            if repo:
+                self.say(f"  modelo base: repositório copiado de {self.config_from / PROJECT_FILE}")
+                return repo, str(ref_data.get("base_ref") or "").strip()
+        return "", ""
+
+    # 1b --------------------------------------------------------------- modelo base (base_repo)
+    def base_model(self, project: dict) -> None:
+        repo = str(project.get("base_repo") or "").strip()
+        if not repo:
+            return
+        from .base_repo import BaseRepoError, sync_base
+        from .project import BASE_CACHE
+
+        try:
+            result = sync_base(repo, self.folder / BASE_CACHE, str(project.get("base_ref") or "").strip(), self.say)
+        except BaseRepoError as exc:
+            self.notes.append(str(exc))
+            return
+        self.say(f"  modelo base ({BASE_CACHE}): {result}")
+        if result.startswith("NÃO"):
+            self.notes.append(f"Modelo base {result}.")
 
     def _choose_workbook(self) -> Path:
         if self.workbook_arg:
@@ -375,6 +424,7 @@ def _console_ask(question: str, default: str) -> str:
 
 def run_setup(folder: Optional[str] = None, workbook: Optional[str] = None, code: Optional[str] = None,
               vscode: bool = True, ask: Callable[[str, str], str] = _console_ask,
-              config_from: Optional[str] = None) -> int:
+              config_from: Optional[str] = None, base_repo: Optional[str] = None,
+              base_ref: Optional[str] = None) -> int:
     return Setup(Path(folder) if folder else Path.cwd(), ask, workbook=workbook, code=code, vscode=vscode,
-                 config_from=config_from).run()
+                 config_from=config_from, base_repo=base_repo, base_ref=base_ref).run()

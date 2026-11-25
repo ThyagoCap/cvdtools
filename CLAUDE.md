@@ -32,7 +32,7 @@ Repositório: github.com/ThyagoCap/cvdtools (privado). Responda em português.
 - `dynamics/`: `dynbase.py` (`_dyn.dat` a partir da 01.Horizontal), `seastates.py` (estados de mar da aba Mares), `run.py`.
 - `post/` (extração, janela, busca adaptativa), `screening/` (domínio da frequência, semi-dinâmico, resposta da embarcação).
 - `cli.py` (`python -m cvdtools ...`), `api.py` (uma função por etapa, usada pelos scripts),
-  `setup_project.py` (`setup`, `update`) e `templates/scripts/` (scripts da equipe: `00_caso.py`, `01_...` a `99_...`).
+  `setup_project.py` (`setup`, `update`), `base_repo.py` (modelo base baixado do repositório `base_repo` do `cvd_project.json` para `.cvd_base`; 0.14.0) e `templates/scripts/` (scripts da equipe: `00_caso.py`, `01_...` a `99_...`).
 
 ## Decisões de modelagem e solver (com o porquê)
 

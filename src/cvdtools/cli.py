@@ -61,7 +61,7 @@ def _cmd_setup(args) -> int:
     from .setup_project import run_setup
 
     return run_setup(args.folder, args.workbook_path, args.code, vscode=not args.no_vscode,
-                     config_from=args.config_from)
+                     config_from=args.config_from, base_repo=args.base_repo, base_ref=args.base_ref)
 
 
 def _cmd_update(args) -> int:
@@ -811,6 +811,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-vscode", action="store_true", help="Não cria/altera .vscode/settings.json")
     p.add_argument("--config-from", help="Pasta de projeto de referência: copia cvd_config.xlsx e cvd_curves.xlsx "
                                          "que faltarem")
+    p.add_argument("--base-repo", help="Repositório git com a pasta 00.Base (modelo base do OrcaFlex): baixado em "
+                                       ".cvd_base e atualizado a cada setup/update")
+    p.add_argument("--base-ref", help="Branch ou tag do repositório do modelo base (padrão: o principal)")
     p.set_defaults(func=_cmd_setup)
 
     p = sub.add_parser("update", aliases=["atualizar"],

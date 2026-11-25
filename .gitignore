@@ -11,6 +11,9 @@ venv/
 # OrcaFlex e saídas das análises (dados de cliente: nunca vão para o git)
 *.sim
 *.dat
+*.yml
+*.yaml
+!/.github/**/*.yml
 *.yml.bak
 *.log
 
@@ -22,6 +25,7 @@ venv/
 /scripts/
 /baseline/
 /.vscode/
+/.cvd_base/
 *.bak
 *.bak_*.xlsx
 cvd_config.bak_*

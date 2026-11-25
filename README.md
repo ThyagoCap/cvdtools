@@ -22,6 +22,14 @@ Num projeto que já tem uma pasta configurada (papéis, padrões e grade de mare
 python -m cvdtools setup --config-from "<pasta de projeto de referência>"
 ```
 
+**Modelo base pelo GitHub (0.14.0):** a pasta `00.Base` pode ficar num repositório git privado próprio do projeto (com `00.Base/base_input.yml` ou `.dat`), em vez de ser distribuída à mão. Uma vez, na pasta de projeto de referência:
+
+```bat
+python -m cvdtools setup --base-repo "https://github.com/<conta>/<repositorio-da-base>.git"
+```
+
+O endereço fica no `cvd_project.json` (`base_repo`; `base_ref` opcional = branch ou tag) e o repositório é baixado em `.cvd_base\`. Cada `setup`/`update` traz a versão mais nova, e o build baixa sozinho na primeira vez. Quem faz `setup --config-from <pasta de referência>` herda o `base_repo`, então só precisa de acesso ao repositório (mesmo login do GitHub). A aba Operações pode continuar citando `00.Base/base_input.dat`: se só existir o `.yml` com o mesmo nome, ele é usado. A cópia em `.cvd_base` não deve ser editada (se for, o setup não a atualiza e avisa); mudanças no modelo base vão para o repositório.
+
 **Atualizar depois:** `python -m cvdtools update` (na pasta de projeto) instala a versão do GitHub e roda o `setup`. Mesmo sem ele, os scripts se atualizam sozinhos na primeira vez que um roda depois de o cvdtools mudar.
 
 O `setup` acha a planilha geral (aba "Input Sheet") e a pasta `00.Base` nesta pasta ou nas de cima e cria:
@@ -40,7 +48,7 @@ python -m pip install -e ".[dev,orcaflex]"
 python -m pytest -q -m "not orcaflex and not baseline"
 ```
 
-- Uma versão nova: suba `version` em `pyproject.toml` e `src/cvdtools/__init__.py`, rode os testes, faça o commit e uma tag (`git tag v0.13.1 && git push --tags`). A equipe atualiza com o comando 1 (sem tag, pega o `main`; para fixar uma versão: `...cvdtools.git@v0.13.1`).
+- Uma versão nova: suba `version` em `pyproject.toml` e `src/cvdtools/__init__.py`, rode os testes, faça o commit e uma tag (`git tag v0.14.0 && git push --tags`). A equipe atualiza com o comando 1 (sem tag, pega o `main`; para fixar uma versão: `...cvdtools.git@v0.14.0`).
 - Script novo para a equipe: um arquivo em `src/cvdtools/templates/scripts/` que chama uma função de `src/cvdtools/api.py`. O `setup` distribui.
 - O GitHub Actions (`.github/workflows/tests.yml`) roda os testes sem OrcaFlex em cada push.
 - Arquivos de projeto (`cvd_project.json`, `cvd_config.xlsx`, `cvd_curves.xlsx`, `casos/`, `scripts/`, `baseline/`) e arquivos do OrcaFlex nunca entram no git (`.gitignore`).
